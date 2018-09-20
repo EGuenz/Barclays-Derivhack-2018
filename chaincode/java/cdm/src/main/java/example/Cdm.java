@@ -18,7 +18,7 @@ package example;
 
 import static java.lang.String.format;
 import static java.nio.charset.StandardCharsets.UTF_8;
-
+import java.util.ArrayList;
 import javax.json.Json;
 
 import org.apache.commons.logging.Log;
@@ -69,19 +69,28 @@ public Response invoke(ChaincodeStub stub) {
 }
 
   private Response submit(ChaincodeStub stub, String[] args){
-		if (args.length != 1) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: submit(trade)");
+  	if (args.length != 1) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: submit(trade)");
+  	final String tradeJson = args[0];
+  	//Unmarshall tradeJson into a CDM Event
+  	Gson gson = new Gson();
+  	Event tradeEvent = gson.fromJson(tradeJson, Event.class);
+  	return processTrade(stub, event);
+  }
 
-		final String tradeJson = args[0];
+  private Response processTrade(Chaincode stub, Event tradeEvent){
+  	IntentEnum eventType = event.getIntent();
+  	if (eventType == NEW_TRADE || eventType == TERMINATION || eventType == PARTIAL_TERMINATION){
+			 String id = event.getId();
+		   String key = stub.createCompositeKey("tradeEvent", id);
+		   stub.putStringState(key, tradeJson);
+		} else if (eventType == NOVATION || eventType == PARTIAL_NOVATION){
+			EventEffect effect = event.getEventEffect();
+			List<String> newContracts = effect.getContract();
+			List<String> newPayments = effect.getPayment();
+		}
 
-		//TODO: Unmarshall tradeJson into a CDM contract, make composite key based on Contract Fields
-    Gson gson = new Gson();
-		Contract contract = gson.fromJson(tradeJson, Contract.class);
-		String id = contract.getId();
-		String key = stub.createCompositeKey("initialTrade", id)
-		stub.putStringState(key, tradeJson);
-		return newSuccessResponse();
-	}
-
+  	return newSuccessResponse();
+  }
 
 	private Response init(ChaincodeStub stub, String[] args) {
 		if (args.length != 1) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: init(accountData)");
@@ -92,28 +101,14 @@ public Response invoke(ChaincodeStub stub) {
 		return newSuccessResponse();
 	}
 
-/*
-
-	private Response delete(ChaincodeStub stub, String args[]) {
-		if (args.length != 1) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: delete(account)");
-
-		final String account = args[0];
-
-		stub.delState(account);
-
-		return newSuccessResponse();
-	}
-
-	*/
-
 	private Response query(ChaincodeStub stub, String[] args) {
 		if (args.length != 1) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: query(Id)");
 
 		final String id = args[0];
-		String key = stub.createCompositeKey("initialTrade", id);
+		String key = stub.createCompositeKey("tradeEvent", id);
 
 		return newSuccessResponse(Json.createObjectBuilder()
-				.add("Trade", key)
+				.add("TradeEvent", key)
 				.add("Content", stub.getStringState(key))
 				.build().toString().getBytes(UTF_8));
 	}
