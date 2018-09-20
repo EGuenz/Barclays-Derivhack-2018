@@ -26,9 +26,9 @@ import org.apache.commons.logging.LogFactory;
 import org.hyperledger.fabric.shim.ChaincodeBase;
 import org.hyperledger.fabric.shim.ChaincodeStub;
 
-public class Example02 extends ChaincodeBase {
+public class Cdm extends ChaincodeBase {
 
-	private static Log log = LogFactory.getLog(Example02.class);
+	private static Log log = LogFactory.getLog(Cdm.class);
 
 	@Override
 	public Response init(ChaincodeStub stub) {
@@ -45,6 +45,7 @@ public class Example02 extends ChaincodeBase {
 		}
 	}
 
+  /*
 	@Override
 	public Response invoke(ChaincodeStub stub) {
 
@@ -67,55 +68,52 @@ public class Example02 extends ChaincodeBase {
 		}
 
 	}
+*/
+
+@Override
+public Response invoke(ChaincodeStub stub) {
+
+	try {
+		final String function = stub.getFunction();
+		final String[] args = stub.getParameters().stream().toArray(String[]::new);
+
+		switch (function) {
+		case "submit":
+			return move(stub, args);
+		case "query":
+			return query(stub, args);
+		default:
+			return newErrorResponse(format("Unknown function: %s", function));
+		}
+	} catch (Throwable e) {
+		return newErrorResponse(e);
+	}
+
+}
+
+  private Response submit(ChaincodeStub stub, String[] args){
+		if (args.length != 1) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: submit(trade)");
+
+		final String tradeJson = args[0];
+
+		//TODO: Unmarshall tradeJson into a CDM contract, make composite key based on Contract Fields
+
+		String key = stub.createCompositeKey()
+
+		stub.putStringState(key, tradeJson);
+	}
+
 
 	private Response init(ChaincodeStub stub, String[] args) {
-		if (args.length != 4) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: init(account1, amount1, account2, amount2)");
+		if (args.length != 1) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: init(accountData)");
 
-		final String accountKey1 = args[0];
-		final String accountKey2 = args[2];
-		final String account1Balance = args[1];
-		final String account2Balance = args[3];
-
-		stub.putStringState(accountKey1, new Integer(account1Balance).toString());
-		stub.putStringState(accountKey2, new Integer(account2Balance).toString());
+		final String accountsJson = args[0];
+		stub.putStringState("accounts", accountsJson);
 
 		return newSuccessResponse();
 	}
 
-	private Response move(ChaincodeStub stub, String[] args) {
-		if (args.length != 3) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: transfer(from, to, amount)");
-
-		final String fromKey = args[0];
-		final String toKey = args[1];
-		final String amount = args[2];
-
-		// get state of the from/to keys
-		final String fromKeyState = stub.getStringState(fromKey);
-		final String toKeyState = stub.getStringState(toKey);
-
-		// parse states as integers
-		int fromAccountBalance = Integer.parseInt(fromKeyState);
-		int toAccountBalance = Integer.parseInt(toKeyState);
-
-		// parse the transfer amount as an integer
-		int transferAmount = Integer.parseInt(amount);
-
-		// make sure the transfer is possible
-		if (transferAmount > fromAccountBalance) {
-			throw new IllegalArgumentException("Insufficient asset holding value for requested transfer amount.");
-		}
-
-		// perform the transfer
-		log.info(format("Tranferring %d holdings from %s to %s", transferAmount, fromKey, toKey));
-		int newFromAccountBalance = fromAccountBalance - transferAmount;
-		int newToAccountBalance = toAccountBalance + transferAmount;
-		log.info(format("New holding values will be: %s = %d, %s = %d", fromKey, newFromAccountBalance, toKey, newToAccountBalance));
-		stub.putStringState(fromKey, Integer.toString(newFromAccountBalance));
-		stub.putStringState(toKey, Integer.toString(newToAccountBalance));
-		log.info("Transfer complete.");
-
-		return newSuccessResponse(format("Successfully transferred %d assets from %s to %s.", transferAmount, fromKey, toKey));
-	}
+/*
 
 	private Response delete(ChaincodeStub stub, String args[]) {
 		if (args.length != 1) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: delete(account)");
@@ -127,20 +125,22 @@ public class Example02 extends ChaincodeBase {
 		return newSuccessResponse();
 	}
 
+	*/
+
 	private Response query(ChaincodeStub stub, String[] args) {
 		if (args.length != 1) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: query(account)");
 
 		final String accountKey = args[0];
 
 		return newSuccessResponse(Json.createObjectBuilder()
-				.add("Name", accountKey)
-				.add("Amount", Integer.parseInt(stub.getStringState(accountKey)))
+				.add("Trade", accountKey)
+				.add("Content", stub.getStringState(accountKey))
 				.build().toString().getBytes(UTF_8));
 
 	}
 
 	public static void main(String[] args) throws Exception {
-		new Example02().start(args);
+		new Cdm().start(args);
 	}
 
 }
