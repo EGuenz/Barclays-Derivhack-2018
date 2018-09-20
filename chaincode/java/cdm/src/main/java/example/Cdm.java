@@ -25,6 +25,8 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.hyperledger.fabric.shim.ChaincodeBase;
 import org.hyperledger.fabric.shim.ChaincodeStub;
+import org.isda.cdm.*;
+import com.google.gson.*;
 
 public class Cdm extends ChaincodeBase {
 
@@ -44,31 +46,6 @@ public class Cdm extends ChaincodeBase {
 			return newErrorResponse(e);
 		}
 	}
-
-  /*
-	@Override
-	public Response invoke(ChaincodeStub stub) {
-
-		try {
-			final String function = stub.getFunction();
-			final String[] args = stub.getParameters().stream().toArray(String[]::new);
-
-			switch (function) {
-			case "move":
-				return move(stub, args);
-			case "delete":
-				return delete(stub, args);
-			case "query":
-				return query(stub, args);
-			default:
-				return newErrorResponse(format("Unknown function: %s", function));
-			}
-		} catch (Throwable e) {
-			return newErrorResponse(e);
-		}
-
-	}
-*/
 
 @Override
 public Response invoke(ChaincodeStub stub) {
@@ -97,10 +74,12 @@ public Response invoke(ChaincodeStub stub) {
 		final String tradeJson = args[0];
 
 		//TODO: Unmarshall tradeJson into a CDM contract, make composite key based on Contract Fields
-
-		String key = stub.createCompositeKey()
-
+    Gson gson = new Gson();
+		Contract contract = gson.fromJson(tradeJson, Contract.class);
+		String id = contract.getId();
+		String key = stub.createCompositeKey("initialTrade", id)
 		stub.putStringState(key, tradeJson);
+		return newSuccessResponse();
 	}
 
 
@@ -128,15 +107,15 @@ public Response invoke(ChaincodeStub stub) {
 	*/
 
 	private Response query(ChaincodeStub stub, String[] args) {
-		if (args.length != 1) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: query(account)");
+		if (args.length != 1) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: query(Id)");
 
-		final String accountKey = args[0];
+		final String id = args[0];
+		String key = stub.createCompositeKey("initialTrade", id);
 
 		return newSuccessResponse(Json.createObjectBuilder()
-				.add("Trade", accountKey)
-				.add("Content", stub.getStringState(accountKey))
+				.add("Trade", key)
+				.add("Content", stub.getStringState(key))
 				.build().toString().getBytes(UTF_8));
-
 	}
 
 	public static void main(String[] args) throws Exception {
