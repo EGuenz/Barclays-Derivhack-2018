@@ -29,6 +29,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.hyperledger.fabric.shim.ChaincodeBase;
 import org.hyperledger.fabric.shim.ChaincodeStub;
+
 import org.isda.cdm.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -87,7 +88,7 @@ public Response invoke(ChaincodeStub stub) {
   	IntentEnum eventType = event.getIntent();
 		String id = event.getEventIdentifier();
 		String date = event.getEventDate().toString();
-		String key = stub.createCompositeKey("tradeEvent", id, date);
+		String key = stub.createCompositeKey("tradeEvent", date, id);
   	if (eventType == NEW_TRADE || eventType == TERMINATION || eventType == PARTIAL_TERMINATION){
 			 String eventString = event.toString();
 		   stub.putStringState(key, eventString);
@@ -110,6 +111,7 @@ public Response invoke(ChaincodeStub stub) {
 
     //Initializes New Contract created, Contract Modified and payment info for original Event
 		List<Payment> newPayments = event.getPrimitive().getPayment();
+
 		Contract created = event.getPrimitive().getNewTrade().get(0).getContract();
 		Contract modified = event.getPrimitive().getTermsChange().getAfter().getContract().get(0);
 
@@ -182,15 +184,27 @@ public Response invoke(ChaincodeStub stub) {
 	}
 
 	private Response query(ChaincodeStub stub, String[] args) {
-		if (args.length != 1) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: query(Id)");
+		if (args.length > 3 || args.length < 2) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: query(history, date) or query(history, date, id)");
 
-		final String id = args[0];
-		String key = stub.createCompositeKey("tradeEvent", id);
+		final boolean history = (args[0] == "y");
+		final String date = args[1];
 
-		return newSuccessResponse(Json.createObjectBuilder()
-				.add("TradeEvent", key)
-				.add("Content", stub.getStringState(key))
-				.build().toString().getBytes(UTF_8));
+		if (args.length == 3){
+		  final String id = args[2];
+			String key = stub.createCompositeKey("tradeEvent", date, id);
+		  } //else{
+			// String partialKey = stub.createCompositeKey("tradeEvent", date);
+			// QueryResultsIterator<KeyValue> results = getStateByPartialCompositeKey(partialKey);
+			// JsonObject object = Json.createObjectBuilder().build();
+      // while(results.hasNext()){
+			//
+			// }
+
+			return newSuccessResponse(Json.createObjectBuilder()
+					.add("TradeEvent", key)
+					.add("Content", stub.getStringState(key))
+					.build().toString().getBytes(UTF_8));
+
 	}
 
 	public static void main(String[] args) throws Exception {
