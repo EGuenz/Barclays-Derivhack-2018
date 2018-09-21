@@ -14,18 +14,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+
+//Event, IntentEnum, Event.EventBuilder, Event.EventEffectBuilder, payment, contract,
 package example;
 
 import static java.lang.String.format;
 import static java.nio.charset.StandardCharsets.UTF_8;
+import java.util.List;
 import java.util.ArrayList;
 import javax.json.Json;
+import java.util.Map;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.hyperledger.fabric.shim.ChaincodeBase;
 import org.hyperledger.fabric.shim.ChaincodeStub;
 import org.isda.cdm.*;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.regnosys.rosetta.common.serialisation.RosettaObjectMapper;
 
@@ -75,56 +80,84 @@ public Response invoke(ChaincodeStub stub) {
   	//Unmarshall tradeJson into a CDM Event
   	ObjectMapper rosettaObjectMapper = RosettaObjectMapper.getDefaultRosettaObjectMapper();
   	Event event = rosettaObjectMapper.readValue(json, event.getClass());
-  	return processTrade(stub, event);
+  	return processEvent(stub, event);
   }
 
-  private Response processTrade(Chaincode stub, Event event){
+  private Response processEvent(Chaincode stub, Event event){
   	IntentEnum eventType = event.getIntent();
 		String id = event.getEventIdentifier();
-		String key = stub.createCompositeKey("tradeEvent", id);
+		String date = event.getEventDate().toString();
+		String key = stub.createCompositeKey("tradeEvent", id, date);
   	if (eventType == NEW_TRADE || eventType == TERMINATION || eventType == PARTIAL_TERMINATION){
 			 String eventString = event.toString();
 		   stub.putStringState(key, eventString);
 		} else if (eventType == NOVATION || eventType == PARTIAL_NOVATION){
 			 processNovation(stub, event, key)
 		}
-		//TODO: Add other eventTypes for other Use Cases
   	return newSuccessResponse();
   }
 
+  //creates copy of original trade with event specifics deleted, writes to ledger
+	private Event clearEffects(Event e){
+		return (Event.EventBuilder.clone(event.toBuilder())
+											.setEventEffect(EventEffectBuilder.build())
+													.build());
+	}
+
 	private void processNovation(Chaincode stub, Event event, String key){
 
-		//creates copy of original trade with event specifics deleted, writes to ledger
-		Event eNew = Event.EventBuilder.clone(event.toBuilder())
-											.setEventEffect(EventEffectBuilder.build())
-													.build();
-    String eventString = eNew.toString();
-		stub.putStringState(key, eventString);
+		Event eNew;
 
-    //Initializes contract and payment info for original trade
-		List<String> newContracts = event.getEventEffect().getContract()
-		List<String> newPayments = event.getEventEffect().getPayment();
-		int i, j;
-		String contractString, paymentString;
-    Contract contract;
-		Payment payment;
+    //Initializes New Contract created, Contract Modified and payment info for original Event
+		List<Payment> newPayments = event.getPrimitive().getPayment();
+		Contract created = event.getPrimitive().getNewTrade().get(0).getContract();
+		Contract modified = event.getPrimitive().getTermsChange().getAfter().getContract().get(0);
 
-		//Matches contract to optional payment, constructs new events written to private channels
-		//UNFINISHED, DO IN MORNING
-		for (i = 0; i < newContracts.size(); i++){
-			contractString = newContracts.get(i);
-			contract = parseContract(contractString);
-			for (j = 0; j < newPayments.size(); j++){
-				paymentString = newPayments.get(j);
-				payment = parsePayment(paymentString);
-				String paymentPayer = payment.getPayerReceiver().getPayerPartyReference();
-				String paymentReceiver = payment.getPayerReceiver().getReceiverPartyReference();
-				String contractPayer =
-				if (equals(contract.getParty()))
-				//eventBuilder.addPayment(payment);
-			}
-			eNew = eNew.setEventEffectBuilder(eventBuilder);
+
+    //Find payer-receiver match for created, create new Contract, add created to private channel
+		eNew = matchPaymentAndBuild(event, created, payments);
+		String createdString = eNew.toString();
+		stub.putStringState(key, createdString);
+
+
+   // Find payer-receiver match for modified contract, create New, remove payer from add created to Hyperledger
+		eNew = matchPaymentAndBuild(event, modified, payments);
+		String modifiedString = eNew.toString();
+		stub.putStringState(key, modifiedString);
+
+
+		int numPaymentsLeft = newPayments.size();
+		//Deal with left over payments
+		for (j = 0; j < numPaymentsLeft; j++){
+				eNew = clearEffects(event).setEffectedEvent(EventEffect.builder().
+									 addPayment(pay.toString()).
+											 build());
+					stub.putStringState(key, eNew.toString());
 		}
+
+	}
+
+	private Event matchPaymentAndBuild(Event event, Contract contract, List<Payment> payments){
+    Payment pay;
+		Event eNew;
+
+		List<String> partyIds = created.getParty().stream()
+																	.map(p -> p.getPartyIdScheme());
+		for (int i = 0; i < payments.size(); i++){
+			  pay = payments.get(i);
+			  if contractParties.contains(pay.getPayerReceiver.getPayerPartyReference()) &&
+				   contractParties.contains(pay.getPayerReceiver.getReceiverPartyReference()){
+						 eNew = clearEffects(event).setEffectedEvent(EventEffect.builder().
+						 						addPayment(pay.toString()).
+														build());
+						 payments.remove(i);
+						 break;
+					 }
+		}
+		eNew = eNew.setEffectedEvent(eNew.getEventEffect().toBuilder().
+		             addContract(contract.toString()));
+
+		return eNew;
 	}
 
 	private Contract parseContract(String contractString){
