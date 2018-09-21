@@ -26,7 +26,8 @@ import org.apache.commons.logging.LogFactory;
 import org.hyperledger.fabric.shim.ChaincodeBase;
 import org.hyperledger.fabric.shim.ChaincodeStub;
 import org.isda.cdm.*;
-import com.google.gson.*;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.regnosys.rosetta.common.serialisation.RosettaObjectMapper;
 
 public class Cdm extends ChaincodeBase {
 
@@ -72,25 +73,71 @@ public Response invoke(ChaincodeStub stub) {
   	if (args.length != 1) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: submit(trade)");
   	final String tradeJson = args[0];
   	//Unmarshall tradeJson into a CDM Event
-  	Gson gson = new Gson();
-  	Event tradeEvent = gson.fromJson(tradeJson, Event.class);
+  	ObjectMapper rosettaObjectMapper = RosettaObjectMapper.getDefaultRosettaObjectMapper();
+  	Event event = rosettaObjectMapper.readValue(json, event.getClass());
   	return processTrade(stub, event);
   }
 
-  private Response processTrade(Chaincode stub, Event tradeEvent){
+  private Response processTrade(Chaincode stub, Event event){
   	IntentEnum eventType = event.getIntent();
+		String id = event.getEventIdentifier();
+		String key = stub.createCompositeKey("tradeEvent", id);
   	if (eventType == NEW_TRADE || eventType == TERMINATION || eventType == PARTIAL_TERMINATION){
-			 String id = event.getId();
-		   String key = stub.createCompositeKey("tradeEvent", id);
-		   stub.putStringState(key, tradeJson);
+			 String eventString = event.toString();
+		   stub.putStringState(key, eventString);
 		} else if (eventType == NOVATION || eventType == PARTIAL_NOVATION){
-			EventEffect effect = event.getEventEffect();
-			List<String> newContracts = effect.getContract();
-			List<String> newPayments = effect.getPayment();
+			 processNovation(stub, event, key)
 		}
-
+		//TODO: Add other eventTypes for other Use Cases
   	return newSuccessResponse();
   }
+
+	private void processNovation(Chaincode stub, Event event, String key){
+
+		//creates copy of original trade with event specifics deleted, writes to ledger
+		Event eNew = Event.EventBuilder.clone(event.toBuilder())
+											.setEventEffect(EventEffectBuilder.build())
+													.build();
+    String eventString = eNew.toString();
+		stub.putStringState(key, eventString);
+
+    //Initializes contract and payment info for original trade
+		List<String> newContracts = event.getEventEffect().getContract()
+		List<String> newPayments = event.getEventEffect().getPayment();
+		int i, j;
+		String contractString, paymentString;
+    Contract contract;
+		Payment payment;
+
+		//Matches contract to optional payment, constructs new events written to private channels
+		//UNFINISHED, DO IN MORNING
+		for (i = 0; i < newContracts.size(); i++){
+			contractString = newContracts.get(i);
+			contract = parseContract(contractString);
+			for (j = 0; j < newPayments.size(); j++){
+				paymentString = newPayments.get(j);
+				payment = parsePayment(paymentString);
+				String paymentPayer = payment.getPayerReceiver().getPayerPartyReference();
+				String paymentReceiver = payment.getPayerReceiver().getReceiverPartyReference();
+				String contractPayer =
+				if (equals(contract.getParty()))
+				//eventBuilder.addPayment(payment);
+			}
+			eNew = eNew.setEventEffectBuilder(eventBuilder);
+		}
+	}
+
+	private Contract parseContract(String contractString){
+    ObjectMapper rosettaObjectMapper = RosettaObjectMapper.getDefaultRosettaObjectMapper();
+		Contract contract = rosettaObjectMapper.readValue(json, contract.getClass());
+		return contract;
+	}
+
+	private Payment parsePayment(String paymentString){
+		ObjectMapper rosettaObjectMapper = RosettaObjectMapper.getDefaultRosettaObjectMapper();
+		Payment payment = rosettaObjectMapper.readValue(json, payment.getClass());
+		return payment;
+	}
 
 	private Response init(ChaincodeStub stub, String[] args) {
 		if (args.length != 1) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: init(accountData)");
