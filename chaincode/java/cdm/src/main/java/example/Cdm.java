@@ -13,9 +13,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-
-
-//Event, IntentEnum, Event.EventBuilder, Event.EventEffectBuilder, payment, contract,
 package example;
 
 import static java.lang.String.format;
@@ -63,7 +60,7 @@ public Response invoke(ChaincodeStub stub) {
 
 		switch (function) {
 		case "submit":
-			return move(stub, args);
+			return submit(stub, args);
 		case "query":
 			return query(stub, args);
 		default:
@@ -86,23 +83,26 @@ public Response invoke(ChaincodeStub stub) {
 
   private Response processEvent(Chaincode stub, Event event){
   	IntentEnum eventType = event.getIntent();
+		//get info to create key
 		String id = event.getEventIdentifier();
 		String date = event.getEventDate().toString();
 		String key = stub.createCompositeKey("tradeEvent", date, id);
-  	if (eventType == NEW_TRADE || eventType == TERMINATION || eventType == PARTIAL_TERMINATION){
-			 String eventString = event.toString();
-		   stub.putStringState(key, eventString);
-		} else if (eventType == NOVATION || eventType == PARTIAL_NOVATION){
+
+
+    if (eventType == NOVATION || eventType == PARTIAL_NOVATION){
 			 processNovation(stub, event, key)
+		} else { // if not novation, just store event to ledger
+			 String eventString = event.toString();
+			 stub.putStringState(key, eventString);
 		}
   	return newSuccessResponse();
   }
 
   //creates copy of original trade with event specifics deleted, writes to ledger
 	private Event clearEffects(Event e){
-		return (Event.EventBuilder.clone(event.toBuilder())
+		return Event.EventBuilder.clone(event.toBuilder())
 											.setEventEffect(EventEffectBuilder.build())
-													.build());
+													.build();
 	}
 
 	private void processNovation(Chaincode stub, Event event, String key){
@@ -110,11 +110,14 @@ public Response invoke(ChaincodeStub stub) {
 		Event eNew;
 
     //Initializes New Contract created, Contract Modified and payment info for original Event
-		List<Payment> newPayments = event.getPrimitive().getPayment();
+		//TODO: Implement logic for 4-way novaition, i.e. multiple contracts created
 
 		Contract created = event.getPrimitive().getNewTrade().get(0).getContract();
 		Contract modified = event.getPrimitive().getTermsChange().getAfter().getContract().get(0);
+		List<Payment> newPayments = event.getPrimitive().getPayment();
 
+
+		//TODO: Implement writing events to private chains.
 
     //Find payer-receiver match for created, create new Contract, add created to private channel
 		eNew = matchPaymentAndBuild(event, created, payments);
@@ -134,44 +137,30 @@ public Response invoke(ChaincodeStub stub) {
 				eNew = clearEffects(event).setEffectedEvent(EventEffect.builder().
 									 addPayment(pay.toString()).
 											 build());
-					stub.putStringState(key, eNew.toString());
+				stub.putStringState(key, eNew.toString());
 		}
 
 	}
 
 	private Event matchPaymentAndBuild(Event event, Contract contract, List<Payment> payments){
     Payment pay;
-		Event eNew;
+		Event eNew = clearEffects(event);
 
-		List<String> partyIds = created.getParty().stream()
+		List<String> partyIds = contract.getParty().stream()
 																	.map(p -> p.getPartyIdScheme());
 		for (int i = 0; i < payments.size(); i++){
 			  pay = payments.get(i);
-			  if contractParties.contains(pay.getPayerReceiver.getPayerPartyReference()) &&
-				   contractParties.contains(pay.getPayerReceiver.getReceiverPartyReference()){
-						 eNew = clearEffects(event).setEffectedEvent(EventEffect.builder().
+			  if partyIds.contains(pay.getPayerReceiver.getPayerPartyReference()) &&
+				   partyIds.contains(pay.getPayerReceiver.getReceiverPartyReference()){
+              eNew = eNew.setEffectedEvent(EventEffect.builder().
 						 						addPayment(pay.toString()).
 														build());
-						 payments.remove(i);
-						 break;
+              payments.remove(i);
+              break;
 					 }
 		}
-		eNew = eNew.setEffectedEvent(eNew.getEventEffect().toBuilder().
+		return eNew.setEffectedEvent(eNew.getEventEffect().toBuilder().
 		             addContract(contract.toString()));
-
-		return eNew;
-	}
-
-	private Contract parseContract(String contractString){
-    ObjectMapper rosettaObjectMapper = RosettaObjectMapper.getDefaultRosettaObjectMapper();
-		Contract contract = rosettaObjectMapper.readValue(json, contract.getClass());
-		return contract;
-	}
-
-	private Payment parsePayment(String paymentString){
-		ObjectMapper rosettaObjectMapper = RosettaObjectMapper.getDefaultRosettaObjectMapper();
-		Payment payment = rosettaObjectMapper.readValue(json, payment.getClass());
-		return payment;
 	}
 
 	private Response init(ChaincodeStub stub, String[] args) {
@@ -186,24 +175,28 @@ public Response invoke(ChaincodeStub stub) {
 	private Response query(ChaincodeStub stub, String[] args) {
 		if (args.length > 3 || args.length < 2) throw new IllegalArgumentException("Incorrect number of arguments. Expecting: query(history, date) or query(history, date, id)");
 
-		final boolean history = (args[0] == "y");
+    //TODO: Implement search by history
+		//final boolean history = (args[0] == "y");
+
 		final String date = args[1];
+    JsonOBjectBuilder response = Json.createObjectBuilder();
+		String key;
 
 		if (args.length == 3){
 		  final String id = args[2];
-			String key = stub.createCompositeKey("tradeEvent", date, id);
-		  } //else{
-			// String partialKey = stub.createCompositeKey("tradeEvent", date);
-			// QueryResultsIterator<KeyValue> results = getStateByPartialCompositeKey(partialKey);
-			// JsonObject object = Json.createObjectBuilder().build();
-      // while(results.hasNext()){
-			//
-			// }
+			key = stub.createCompositeKey("tradeEvent", date, id);
+			response.add("TradeEvent", key)
+						  .add("Content", stub.getStringState(key));
+    } else{ //Search by just date, return list of all trades on that day
+			 String partialKey = stub.createCompositeKey("tradeEvent", date);
+			 QueryResultsIterator<KeyValue> results = getStateByPartialCompositeKey(partialKey);
+       while(results.hasNext()){
+				 KeyValue keyval = results.next();
+				 response.add("TradeEvent", keyval.getKey())
+							   .add("Content", keyval.getStringValue());
+       }
 
-			return newSuccessResponse(Json.createObjectBuilder()
-					.add("TradeEvent", key)
-					.add("Content", stub.getStringState(key))
-					.build().toString().getBytes(UTF_8));
+			return newSuccessResponse(response.build().toString().getBytes(UTF_8));
 
 	}
 
